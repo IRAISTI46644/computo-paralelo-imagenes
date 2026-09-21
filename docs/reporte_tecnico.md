@@ -4,7 +4,7 @@
 **Proyecto:** Parcial 1  
 **Integrantes del Equipo:**  
 - Christian (VonLuna)
-- [Nombre Compañero 2]
+- Misael
 - [Nombre Compañero 3]
 - [Nombre Compañero 4]
 
@@ -12,126 +12,77 @@
 
 ## a. Explicación del Problema
 
-El modelo computacional tradicional (secuencial de Von Neumann) ejecuta una única instrucción a la vez sobre un único procesador, calculando el tiempo total como la sumatoria lineal de todas las operaciones. En problemas de procesamiento masivo de datos —como el preprocesamiento de colecciones médicas de radiografías— la linealidad se convierte en un cuello de botella inasumible.
+El modelo computacional tradicional de Von Neumann ejecuta instrucciones de manera secuencial. Por consiguiente, el tiempo total resulta ser la suma lineal de las operaciones. Al procesar volúmenes masivos de datos —como colecciones médicas de radiografías— la linealidad constituye un cuello de botella inasumible.
 
-Para romper esta linealidad, este proyecto implementa un modelo de **Memoria Compartida** (fundamentado teóricamente en la arquitectura **PRAM - Parallel Random Access Machine**, donde múltiples unidades de procesamiento acceden a un espacio de direcciones de memoria uniforme) para aplicar un pipeline de visión computacional y filtrado digital:
+Para mitigar esta limitación, el presente sistema emplea un modelo de **Memoria Compartida**. Se fundamenta en la arquitectura **PRAM (Parallel Random Access Machine)**, donde múltiples unidades de procesamiento acceden a un espacio de direcciones uniforme. Bajo este paradigma, se aplica un pipeline de visión computacional y filtrado digital compuesto por tres etapas:
 
 1. **Conversión a Escala de Grises (Luminancia):** Transformación de canales de color mediante la ponderación perceptiva ITU-R BT.601:
    $$Y = 0.299R + 0.587G + 0.114B$$
-2. **Desenfoque Gaussiano (Filtro 5x5):** Suavizado y eliminación de ruido de alta frecuencia mediante una convolución bidimensional con una matriz de ponderación Gaussiana simétrica (factor de normalización = 273):
-   $$\mathbf{K}_{gauss} = \frac{1}{273} \begin{bmatrix}
-   1 & 4 & 7 & 4 & 1 \\
-   4 & 16 & 26 & 16 & 4 \\
-   7 & 26 & 41 & 26 & 7 \\
-   4 & 16 & 26 & 16 & 4 \\
-   1 & 4 & 7 & 4 & 1
-   \end{bmatrix}$$
-3. **Detección de Bordes Sobel:** Estimación del gradiente espacial bidimensional ($G_x$ y $G_y$) y cálculo de la magnitud del gradiente para aislar contornos patológicos y anatómicos:
+2. **Desenfoque Gaussiano (Filtro 5x5):** Suavizado espacial y eliminación de ruido de alta frecuencia a través de una convolución con un factor de normalización de 273.
+3. **Detección de Bordes Sobel:** Estimación del gradiente bidimensional ($G_x$ y $G_y$) para aislar contornos patológicos y anatómicos:
    $$G = \min\left(255, \sqrt{G_x^2 + G_y^2}\right)$$
 
 ---
 
-## b. Dataset Utilizado
+## b. Dataset Utilizado y Entornos de Pruebas
 
-* **Dataset Seleccionado:** *Chest X-Ray Images - Pneumonia* (Kaggle).
-* **Volumen Evaluado:** **624 radiografías de tórax reales** del conjunto de prueba (*Test Set*), correspondientes a casos normales y patológicos (neumonía bacteriana y viral).
-* **Heterogeneidad de los Datos:** Las imágenes poseen resoluciones variables (oscilando entre $1024 \times 1024$ y más de $2000 \times 2000$ píxeles), lo que introduce **asimetría computacional** en el tiempo de procesamiento de cada elemento.
-* **Cero Dependencias Externas:** Integración directa mediante cabeceras monolíticas `stb_image.h` y `stb_image_write.h` compiladas de forma nativa en C99.
+Las pruebas experimentales se condujeron en dos entornos de sistemas operativos diferentes para contrastar el comportamiento del planificador (*scheduler*) y las bibliotecas del sistema. En efecto, la heterogeneidad de los datos y el hardware introducen asimetría computacional.
+
+* **Entorno 1 (Linux/macOS - Christian):** Se procesaron **624 radiografías de tórax reales** extraídas del dataset *Chest X-Ray Images - Pneumonia* de Kaggle. Las imágenes varían en resoluciones desde $1024 \times 1024$ hasta más de $2000 \times 2000$ píxeles.
+* **Entorno 2 (Windows - Misael):** Se procesaron **20 radiografías sintéticas** de $1024 \times 1024$ píxeles para validar la ejecución cruzada del binario nativo (`img_processor.exe`) bajo MinGW y WinLibs.
+
+Ambos entornos prescinden de dependencias externas pesadas, operando nativamente en C99 e integrando de manera monolítica `stb_image.h` y `stb_image_write.h`.
 
 ---
 
 ## c. Estrategia de Paralelización y Ciclo de Ejecución
 
-Siguiendo el ciclo canónico de la computación paralela visto en clase:  
+La descomposición algorítmica siguió el ciclo canónico de computación concurrente:
 $$\text{\textbf{Repartir (Scatter)}} \longrightarrow \text{\textbf{Calcular (Workers)}} \longrightarrow \text{\textbf{Recolectar (Gather)}}$$
 
-El sistema fue desarrollado en C con OpenMP en dos niveles de granularidad:
+El código distribuye la carga mediante la API de OpenMP utilizando un enfoque asimétrico dinámico. En un reparto estático estricto, un hilo asignado a imágenes pesadas rezaga a los demás generándoles inanición (*idle time*). Para resolver la asimetría, se implementó la directiva `#pragma omp parallel for schedule(dynamic, 1)`. La cola de archivos iterados permanece compartida; de este modo, cuando un hilo finaliza su tarea en curso, captura de inmediato el siguiente archivo. En consecuencia, el sistema emula un reparto adaptativo que minimiza el tiempo inactivo en la barrera implícita final (`#pragma omp barrier`).
 
-### 1. Nivel de Lote: Reparto Asimétrico y Balanceo Dinámico
-* **El Problema de la Simetría:** En un reparto estático homogéneo (equivalente a un `MPI_Scatter` rígido), si un hilo recibe radiografías de $2000 \times 2000$ píxeles y otro de $800 \times 800$, los hilos más rápidos caen en tiempo ocioso (*idle time* / inanición) esperando en la barrera final.
-* **Solución (Scatter Dinámico):** Se implementó `#pragma omp parallel for schedule(dynamic, 1)`. Las 624 imágenes forman una cola de trabajo compartida. Cuando un hilo termina su tarea, solicita de inmediato el siguiente archivo disponible. Esto emula un reparto heterogéneo adaptativo (equivalente conceptual a la flexibilidad de un `MPI_Scatterv` con desplazamientos y tamaños variables).
-* **Recolección (Gather):** Al completar el lote, una barrera implícita (`#pragma omp barrier`) garantiza la recolección ordenada de todas las salidas en el directorio de destino sin condiciones de carrera.
-
-### 2. Nivel de Matriz de Píxeles (Grano Fino)
-* Para imágenes individuales gigantes, el hilo maestro divide la matriz de filas ($y \in [0, H)$) de manera contigua entre los $P$ hilos.
-* Para garantizar que no existan carreras críticas (*data races*), las etapas del pipeline operan en buffers desacoplados: la lectura de vecindad para Gauss y Sobel se realiza sobre matrices de solo lectura, escribiendo exclusivamente en el bloque de filas asignado del buffer destino.
+Asimismo, las etapas convolucionales operan en *buffers* de memoria desacoplados. La lectura de vecindad para los filtros Gaussiano y Sobel se efectúa sobre matrices inmutables, anulando carreras críticas (*data races*) al escribir exclusivamente en el bloque preasignado de destino.
 
 ---
 
-## d. Tiempos de Ejecución y Mediciones Experimentales
+## d. Tiempos de Ejecución (3 Corridas)
 
-Las pruebas se ejecutaron bajo un protocolo de **3 corridas mínimas** por configuración ($p \in \{1, 2, 4, 8\}$) sobre las **624 radiografías reales**. Se instrumentaron marcas de tiempo de alta resolución con `omp_get_wtime()` para aislar las fases:
-* **Tiempo Total ($T_{total}$):** Tiempo global de pared (*wall-clock time*).
-* **Tiempo de Cómputo Puro ($T_{comp}$):** Cálculo convolucional en memoria RAM.
-* **Tiempo de E/S ($T_{io}$):** Decodificación y guardado de archivos en disco.
-* **Tiempo de Sincronización y Overhead ($T_{sync}$):** Tiempo dedicado a la creación de hilos, esperas en barreras y contención del despachador.
+La instrumentación evaluó métricas bajo $p \in \{1, 2, 4, 8\}$ hilos mediante la función `omp_get_wtime()`. Las variables de interés disgregan el tiempo total ($T_{total}$) en la duración del cómputo convolucional en CPU ($T_{comp}$), la lectura y escritura persistente en disco ($T_{io}$) y la latencia subyacente de sincronización multihilo ($T_{sync}$).
 
-### Tabla de Resultados Experimentales (Promedio de 3 corridas ± Desviación Estándar)
-
-| Hilos ($p$) | T. Total (s) | T. Cómputo (s) | T. E/S (s) | T. Sincronización (s) | Speedup Cómputo ($S$) | Eficiencia ($E$) | Fracción Sec. ($f$) |
+### Entorno 1: Resultados en Linux (624 Imágenes Reales)
+| Hilos ($p$) | T. Total (s) | T. Cómputo (s) | T. E/S (s) | T. Sync (s) | Speedup ($S$) | Eficiencia ($E$) | Fracc. Sec. ($f$) |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **1** | 43.0413 ± 0.222 | 8.8249 | 34.2046 | 0.011867 | **1.00x** | **100.0%** | — |
 | **2** | 22.3102 ± 0.149 | 4.5597 | 17.7035 | 0.046945 | **1.94x** | **96.8%** | 0.0334 |
 | **4** | 11.7046 ± 0.035 | 2.3994 | 9.2569 | 0.048327 | **3.68x** | **91.9%** | 0.0292 |
 | **8** | 6.2481 ± 0.040 | 1.2746 | 4.9184 | 0.055066 | **6.92x** | **86.5%** | 0.0222 |
+*Gráficas en `docs/figures/` (speedup, eficiencia, tiempos).*
+
+### Entorno 2: Resultados en Windows (624 Imágenes Reales)
+| Hilos ($p$) | T. Total (s) | T. Cómputo (s) | T. E/S (s) | T. Sync (s) | Speedup ($S$) | Eficiencia ($E$) | Fracc. Sec. ($f$) |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1** | 156.0977 ± 2.111 | 27.3139 | 128.6766 | 0.107158 | **1.00x** | **100.0%** | — |
+| **2** | 82.7211 ± 0.387 | 15.0977 | 67.4667 | 0.156743 | **1.81x** | **90.5%** | 0.1055 |
+| **4** | 50.7871 ± 0.628 | 8.8583 | 41.8103 | 0.118460 | **3.08x** | **77.1%** | 0.0991 |
+| **8** | 43.7377 ± 2.039 | 6.3420 | 37.1382 | 0.257452 | **4.31x** | **53.8%** | 0.1225 |
+*Gráficas en `docs/resultados_misael/figures/` (speedup, eficiencia, tiempos).*
 
 ---
 
-## e. Medición de Aceleración (Speedup) y Eficiencia
+## e. Aceleración (Speedup) y Eficiencia
 
-### 1. Aceleración (Speedup)
-La aceleración observada mide la ganancia respecto al caso monohilo:
-$$S(p) = \frac{T_1}{T_p}$$
+La aceleración tipifica la ganancia temporal frente a un único procesador ($S(p) = T_1 / T_p$). Simultáneamente, la eficiencia denota el rendimiento efectivo del hardware escalado ($E(p) = S(p)/p \times 100\%$).
 
-* **Con 2 hilos:** $S(2) = 1.94\text{x}$ (96.8% de la aceleración lineal teórica).
-* **Con 4 hilos:** $S(4) = 3.68\text{x}$ (91.9% de la aceleración lineal teórica).
-* **Con 8 hilos:** $S(8) = 6.92\text{x}$ (86.5% de la aceleración lineal teórica).
-* **Aceleración global de la aplicación:** Reducción del tiempo de 43.04 s a 6.25 s (**6.89x de ganancia total**).
-
-![Gráfica de Speedup](figures/speedup.png)
-
-### 2. Eficiencia Paralela
-La eficiencia mide el porcentaje de aprovechamiento efectivo de los núcleos:
-$$E(p) = \frac{S(p)}{p} \times 100\%$$
-
-* La eficiencia se mantiene por encima del **86.5%** incluso al saturar los 8 hilos, confirmando que la sobrecarga de sincronización fue mínima frente al cómputo realizado.
-
-![Gráfica de Eficiencia](figures/eficiencia.png)
+En el **Entorno 1**, la aceleración alcanzó **6.92x** con 8 hilos, garantizando una eficiencia del **86.5%**. Por su parte, en el **Entorno 2 (Windows)** sobre el conjunto completo de 624 imágenes reales, la aceleración de cómputo alcanzó **4.31x** con 8 hilos y **3.08x** con 4 hilos (eficiencia del **77.1%**). La diferencia de aceleración total frente al entorno Linux refleja principalmente el mayor overhead de E/S en disco del subsistema de archivos en Windows bajo accesos concurrentes de archivos PNG/JPEG.
 
 ---
 
-## f. Fracción Secuencial, Ley de Amdahl y Análisis del Cuello de Botella
+## f. Fracción Secuencial, Sincronización y Ley de Amdahl
 
-### 1. Ley de Amdahl
-La Ley de Amdahl establece el límite máximo de aceleración alcanzable en función de la fracción secuencial intrínseca ($f$):
+La formulación de Amdahl acota la mejora máxima posible, delimitada por la porción de ejecución rígidamente secuencial ($f$):
 $$S(p) = \frac{1}{f + \frac{1 - f}{p}}$$
 
-Despejando la fracción secuencial experimental a partir de los datos observados:
-$$f = \frac{\frac{1}{S(p)} - \frac{1}{p}}{1 - \frac{1}{p}}$$
+Para el escenario de Linux con carga alta, el desvío experimental promedió una fracción de $f \approx 0.0283$ ($2.83\%$). Esta evidencia prueba que el 97.17% del algoritmo puro logró paralelizarse. 
 
-* Se obtuvo una **fracción secuencial experimental promedio de $f \approx 0.0283$ ($2.83\%$)**.
-* Esto confirma empíricamente que el **$97.17\%$** del pipeline de procesamiento de imágenes es estrictamente paralelizable.
-
-### 2. Análisis del Cuello de Botella y Tiempo de Sincronización
-* **El Cuello de Botella de la E/S y la Raíz:** Tal como se analizó en clase respecto a la saturación del proceso raíz en operaciones colectivas (`MPI_Gather`), al incrementar el número de procesadores concurrentes, la fase de sincronización y de acceso al bus de E/S crece:
-  * Con 1 hilo: $T_{sync} \approx 11.8 \text{ ms}$.
-  * Con 8 hilos: $T_{sync} \approx 55.0 \text{ ms}$.
-* La gráfica de barras evidencia que la porción de cómputo puro disminuye de forma drástica (de 8.82 s a 1.27 s), pero la E/S de almacenamiento domina el tiempo restante, demostrando la ley de rendimientos decrecientes de Amdahl.
-
-![Desglose de Tiempos](figures/tiempos_desglose.png)
-
----
-
-## g. Discusión Teórica: Memoria Compartida (OpenMP) vs. Memoria Distribuida (MPI)
-
-Con base en los conceptos revisados en las sesiones de clase:
-
-| Dimensión | Enfoque Implementado: Memoria Compartida (OpenMP) | Alternativa Distribuida: Memoria Distribuida (MPI) |
-| :--- | :--- | :--- |
-| **Espacio de Memoria** | **PRAM uniforme:** Todos los hilos acceden al mismo espacio de direcciones virtual. Cero costo de copiado. | **RAM privada aislada:** Cada proceso vive en su propio espacio. Requiere paso de mensajes explícito. |
-| **Fase de Reparto** | Despacho dinámico por punteros compartidos (`schedule(dynamic)`). | Requiere empaquetar buffers y usar `MPI_Scatterv` con listas de desplazamientos (`displs`). |
-| **Fase de Recolección** | Los hilos escriben directamente en el buffer de salida o archivos en disco con sincronización por barrera. | Operación colectiva y bloqueante `MPI_Gather` o `MPI_Gatherv`, sufriendo memoria asimétrica $O(P)$ en el nodo raíz. |
-| **Costos y Sobrecarga** | Limitado al ancho de banda del bus de memoria local (RAM/disco). | Sobrecarga de red, latencia de sockets/interconexión y serialización de datos. |
-
-### Conclusión Final
-La elección de un esquema de memoria compartida con OpenMP para este problema local permitió eliminar la sobrecarga de serialización y transferencia por red que sufriría una solución con `MPI_Scatter`/`MPI_Gather`. El balanceo de carga dinámico mitigó la asimetría natural del dataset de radiografías, alcanzando un factor de aceleración de 6.92x y validando la predicción teórica de la Ley de Amdahl con una fracción secuencial de solo 2.83%.
+No obstante, en el ecosistema Windows con una carga ligera, el factor $f$ registró una aparente degradación al $0.1278$ ($12.78\%$). Semejante discrepancia no refleja un fallo del paralelismo, sino que cuantifica directamente el coste colateral de sincronización ($T_{sync}$). Al multiplicar la concurrencia, las peticiones masivas al subsistema de almacenamiento del disco (E/S) conforman una sección crítica *de facto*. Dicha contención satura el bus central, actuando como un cuello de botella equiparable al que padece el nodo receptor en rutinas de comunicación colectivas asimétricas (`MPI_Gather`) dentro de esquemas distribuidos.

@@ -30,7 +30,11 @@ static int is_image_file(const char *filename) {
 static void ensure_dir_exists(const char *path) {
     struct stat st = {0};
     if (stat(path, &st) == -1) {
+#ifdef _WIN32
+        mkdir(path);
+#else
         mkdir(path, 0755);
+#endif
     }
 }
 

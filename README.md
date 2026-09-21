@@ -5,7 +5,7 @@
 
 ---
 
-## 🎯 Características del Proyecto
+## Características del Proyecto
 
 * **Pipeline Convolucional Completo:**
   1. Conversión de color a Escala de Grises (Fórmula ITU-R BT.601).
@@ -19,30 +19,57 @@
 
 ---
 
-## 🚀 Inicio Rápido (Guía para el Equipo)
+## Guía de Instalación y Compilación
 
 ### 1. Requisitos Previos
-* Compilador C con soporte OpenMP: `gcc`
-* Herramienta de compilación: `make`
-* Python 3 con `matplotlib` y `numpy` (para las gráficas):
-  ```bash
-  pip install -r scripts/requirements.txt
-  ```
 
-### 2. Compilación
-Compila el ejecutable optimizado con un solo comando:
+Dependiendo de tu sistema operativo, asegúrate de tener las herramientas necesarias instaladas:
+
+**Para Linux / macOS:**
+* Compilador C con soporte OpenMP (`gcc` o `clang` con `libomp`)
+* Herramienta `make`
+* Python 3 y pip
+
+**Para Windows:**
+* Entorno MinGW-w64 (como WinLibs) que incluya `gcc` y soporte de POSIX threads. Se puede instalar vía WinGet: `winget install BrechtSanders.WinLibs.POSIX.UCRT`
+* Herramienta `mingw32-make` (incluida generalmente con MinGW)
+* Python 3 y pip
+
+### 2. Dependencias de Python
+Para generar gráficas de benchmarking, instala los paquetes requeridos:
+```bash
+pip install -r scripts/requirements.txt
+```
+
+### 3. Compilación
+
+Para compilar el proyecto, abre tu terminal en la raíz del repositorio y ejecuta:
+
+**Linux / macOS:**
 ```bash
 make
 ```
-El binario resultante se encontrará en `bin/img_processor`.
 
-### 3. Generar Imágenes de Prueba (Rápido)
-Si aún no has descargado el dataset completo de Kaggle, puedes generar 20 radiografías sintéticas de prueba:
-```bash
-python3 scripts/generate_samples.py -n 20
+**Windows:**
+```powershell
+mingw32-make
 ```
 
-### 4. Ejecución Manual
+El binario resultante se encontrará en la carpeta `bin/` (`bin/img_processor` en Linux/Mac o `bin\img_processor.exe` en Windows).
+
+---
+
+## Ejecución Básica
+
+### 1. Generar Imágenes de Prueba
+Si aún no has descargado el dataset completo, puedes generar radiografías sintéticas de prueba:
+```bash
+python scripts/generate_samples.py -n 20
+```
+
+### 2. Ejecución Manual
+Asegúrate de usar la ruta correcta según tu sistema operativo (`./bin/img_processor` en Linux/macOS, `.\bin\img_processor.exe` en Windows):
+
 ```bash
 # Procesar lote con 4 hilos
 ./bin/img_processor -i data/input -o data/output -t 4 --mode batch
@@ -51,16 +78,25 @@ python3 scripts/generate_samples.py -n 20
 ./bin/img_processor -i data/input/sample_xray_001.png -o data/output/res.png -t 8 --mode pixel
 ```
 
-### 5. Ejecutar Benchmark Automatizado y Generar Gráficas
-Corre 3 iteraciones formales con 1, 2, 4 y 8 hilos, y actualiza las gráficas del reporte:
+### 3. Ejecutar Benchmark Automatizado
+El script de benchmark correrá las pruebas y generará gráficas actualizadas. 
+**Nota en Windows:** Es necesario pasar la ruta exacta del ejecutable con extensión `.exe` al script.
+
+**Linux / macOS:**
 ```bash
-python3 scripts/benchmark.py --runs 3
+python scripts/benchmark.py --runs 3
 ```
-Las gráficas resultantes se guardarán en `docs/figures/` (`speedup.png`, `eficiencia.png`, `tiempos_desglose.png`).
+
+**Windows:**
+```powershell
+python scripts/benchmark.py --runs 3 --bin bin/img_processor.exe
+```
+
+Las gráficas resultantes se guardarán en `docs/figures/`.
 
 ---
 
-## 📂 Estructura del Repositorio
+## Estructura del Repositorio
 
 ```text
 .
@@ -87,7 +123,7 @@ Las gráficas resultantes se guardarán en `docs/figures/` (`speedup.png`, `efic
 
 ---
 
-## 👥 Organización del Equipo (4 Personas)
+## Organización del Equipo (4 Personas)
 
 | Rol | Responsable | Área Principal de Trabajo |
 | :--- | :--- | :--- |
