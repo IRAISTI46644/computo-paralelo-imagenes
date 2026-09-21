@@ -1,0 +1,17 @@
+# Binarios y objetos compilados
+bin/
+build/
+*.o
+
+# Salidas de procesamiento y caches
+data/output/*
+!data/output/.gitkeep
+data/input/*
+!data/input/.gitkeep
+__pycache__/
+*.pyc
+
+# Documentos temporales
+.DS_Store
+*.swp
+*.bak
