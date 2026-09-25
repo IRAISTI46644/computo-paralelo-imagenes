@@ -3,10 +3,10 @@
 **Materia:** Cómputo Paralelo y Distribuido  
 **Proyecto:** Parcial 1  
 **Integrantes del Equipo:**  
-- Christian (VonLuna)
-- Misael
-- [Nombre Compañero 3]
-- [Nombre Compañero 4]
+- Christian Luna Ortiz
+- Misael Reynoso Aguayo
+- Camila Serrano Trinidad
+- Irais Gisela Macuil Chapuli
 
 ---
 
